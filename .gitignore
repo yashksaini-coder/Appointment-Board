@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+node_modules/
+dist/
+.env
+
+# Internal engineering notes, not part of the deliverable
+docs/QA.md
