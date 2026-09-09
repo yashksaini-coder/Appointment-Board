@@ -11,7 +11,7 @@ with double-booking prevented at the database level.
 ## Quick start
 
 ```bash
-git clone <repo-url> && cd appointment-board
+git clone https://github.com/yashksaini-coder/Appointment-Board && cd Appointment-Board
 docker compose up --build
 ```
 
