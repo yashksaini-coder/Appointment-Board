@@ -1,0 +1,530 @@
+/* Appointment board.
+
+   The board is a matrix: status runs across in columns, the calendar runs down
+   in day bands that cross all three. Every card carries the same fixed 06:00
+   to 22:00 lane, so a bar's length is a duration you can compare anywhere on
+   screen, and the bar's texture says what the time slot is doing:
+   filled = held and live, outlined = held but closed, hatched = released.
+
+   One rule governs colour: the accent means "this is still going to happen".
+   Anything resolved drains to grey. Red is only ever a blocked action -- never
+   a cancellation, which is a legitimate outcome and not an error. That rule is
+   what the dark palette below has to preserve, so every colour is a semantic
+   token and no rule further down names a hex value directly. */
+
+:root {
+  color-scheme: light;
+
+  --field: #e4e7ea;
+  --sunk: #d9dee3;
+  --card: #ffffff;
+  --ink: #000000;
+  --muted: #5c626a;
+  --line: #c6ccd3;
+  --control-line: #767c85;
+  --hairline: #c6ccd3;
+  --lane-bg: #cfd5dc;
+  --tick: #6b727b;
+  --done-wash: #eef0f2;
+  --rule: #000000;
+
+  --accent: #5b2be0;
+  --accent-solid: #5b2be0;
+  --accent-hover: #4a20bd;
+  --on-accent: #ffffff;
+  --accent-wash: #efeafd;
+  --accent-line: #c6b4f5;
+  --accent-text: #34199a;
+
+  --blocked: #c81e1e;
+  --blocked-wash: #fdf0f0;
+  --blocked-line: #e9baba;
+
+  --backdrop: rgba(16, 18, 22, 0.5);
+  --radius: 4px;
+}
+
+/* Dark has to be declared twice: once for people who never touch the control
+   and inherit it from the OS, once for the explicit choice. The :not() guard is
+   what lets an explicit "light" override a dark OS. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+
+    --field: #101216;
+    --sunk: #171a1f;
+    --card: #21252b;
+    --ink: #eef1f4;
+    --muted: #a0a7b0;
+    --line: #343a42;
+    --control-line: #79818c;
+    --hairline: #343a42;
+    --lane-bg: #0c0f14;
+    --tick: #5f6771;
+    --done-wash: #1b1f24;
+    --rule: #545c67;
+
+    --accent: #b9a4ff;
+    --accent-solid: #6a3ce8;
+    --accent-hover: #7c53f0;
+    --on-accent: #ffffff;
+    --accent-wash: #241d3c;
+    --accent-line: #4b3a8a;
+    --accent-text: #cdbcff;
+
+    --blocked: #f87171;
+    --blocked-wash: #2c1a1c;
+    --blocked-line: #6d3436;
+
+    --backdrop: rgba(0, 0, 0, 0.66);
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --field: #101216;
+  --sunk: #171a1f;
+  --card: #21252b;
+  --ink: #eef1f4;
+  --muted: #a0a7b0;
+  --line: #343a42;
+  --control-line: #79818c;
+  --hairline: #343a42;
+  --lane-bg: #0c0f14;
+  --tick: #5f6771;
+  --done-wash: #1b1f24;
+  --rule: #545c67;
+
+  --accent: #b9a4ff;
+  --accent-solid: #6a3ce8;
+  --accent-hover: #7c53f0;
+  --on-accent: #ffffff;
+  --accent-wash: #241d3c;
+  --accent-line: #4b3a8a;
+  --accent-text: #cdbcff;
+
+  --blocked: #f87171;
+  --blocked-wash: #2c1a1c;
+  --blocked-line: #6d3436;
+
+  --backdrop: rgba(0, 0, 0, 0.66);
+}
+
+:root[data-theme='light'] { color-scheme: light; }
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--field);
+  color: var(--ink);
+  font-family: 'Schibsted Grotesk', ui-sans-serif, system-ui, -apple-system,
+    'Segoe UI', Roboto, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3 { margin: 0; font-weight: 700; letter-spacing: -0.015em; }
+
+.page { max-width: 1240px; margin: 0 auto; padding: clamp(18px, 3vw, 34px) clamp(12px, 2.4vw, 22px) 80px; }
+
+/* ------------------------------------------------------------- masthead */
+
+.masthead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 40px;
+  margin-bottom: 24px;
+}
+.masthead h1 { font-size: clamp(22px, 3.4vw, 30px); line-height: 1.1; }
+.standfirst {
+  margin: 8px 0 0;
+  max-width: 60ch;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+/* ------------------------------------------------------------- controls */
+
+.controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 18px;
+  flex-wrap: wrap;
+  padding-bottom: 16px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+}
+.controls label { display: flex; flex-direction: column; gap: 5px; }
+.controls label span { font-size: 13px; font-weight: 500; color: var(--muted); }
+.tally { margin: 0 0 0 auto; color: var(--muted); font-size: 13px; }
+
+input, select, textarea {
+  font: inherit;
+  color: inherit;
+  background: var(--card);
+  border: 1px solid var(--control-line);
+  border-radius: var(--radius);
+  padding: 7px 10px;
+}
+input[aria-invalid='true'] { border-color: var(--blocked); }
+textarea { resize: vertical; }
+
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* -------------------------------------------------------------- buttons */
+
+.btn {
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  background: var(--card);
+  color: var(--ink);
+  border: 1px solid var(--control-line);
+  border-radius: var(--radius);
+  padding: 7px 13px;
+}
+.btn:hover:not(:disabled) { border-color: var(--ink); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-sm { padding: 4px 9px; font-size: 13px; }
+.btn-primary {
+  background: var(--accent-solid);
+  border-color: var(--accent-solid);
+  color: var(--on-accent);
+  padding: 9px 16px;
+}
+.btn-primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+.btn-quiet { color: var(--muted); }
+
+/* ---------------------------------------------------------------- board */
+
+.board { --columns: 3; margin-top: 20px; }
+
+.board-head,
+.day-row {
+  display: grid;
+  grid-template-columns: repeat(var(--columns), minmax(0, 1fr));
+  gap: 14px;
+}
+
+.board-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 10px 0;
+  margin-bottom: 6px;
+  background: var(--field);
+  border-bottom: 2px solid var(--rule);
+}
+.head { display: flex; align-items: baseline; gap: 8px; }
+.head-name { font-size: 16px; font-weight: 700; }
+.head-count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--muted);
+}
+.head-scheduled .head-name { color: var(--accent); }
+
+/* Day bands are the board's second axis: one full-width row per calendar day,
+   crossing all three status columns at the same height. */
+.day { margin-bottom: 26px; }
+.day-band {
+  position: sticky;
+  top: 44px;            /* clears the sticky column head */
+  z-index: 1;           /* under the head, which is z-index 2 */
+  background: var(--field);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+  padding-bottom: 6px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+.day-band::after {
+  content: '';
+  flex: 1;
+}
+.day-band-today { color: var(--accent); font-weight: 700; border-bottom-color: var(--accent); }
+
+.cell {
+  min-height: 62px;
+  padding: 8px;
+  background: var(--sunk);
+  border-radius: var(--radius);
+}
+.cell-droppable { outline: 1px dashed var(--muted); outline-offset: -3px; }
+.cell-over { outline: 2px dashed var(--control-line); background: var(--done-wash); }
+
+/* ----------------------------------------------------------------- card */
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 11px 13px 12px;
+}
+.card + .card { margin-top: 8px; }
+.card[draggable='true'] { cursor: grab; }
+.card[draggable='true']:active { cursor: grabbing; opacity: 0.55; }
+.card.is-busy { opacity: 0.5; }
+
+.card-top { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+.card-time {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 14px;
+}
+.card-duration { margin-left: auto; font-size: 12px; color: var(--muted); }
+
+/* The grip exists only on cards that can actually move. Terminal cards have
+   nothing to grab, so the illegal drag is never started rather than refused. */
+.grip {
+  width: 7px;
+  height: 15px;
+  flex: none;
+  background-image: radial-gradient(circle, var(--muted) 1px, transparent 1px);
+  background-size: 3.5px 4px;
+  opacity: 0.75;
+}
+
+.card-title {
+  font-size: 15px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.card-note {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.card-state { margin: 7px 0 0; font-size: 12px; color: var(--muted); }
+.card-completed { background: var(--done-wash); }
+.card-cancelled { background: var(--done-wash); }
+.card-cancelled .card-title { text-decoration: line-through; color: var(--muted); }
+.card-cancelled .card-time { color: var(--muted); font-weight: 500; }
+
+.card-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.card-confirm { margin-top: 10px; }
+.card-confirm p { margin: 0 0 8px; font-size: 13px; }
+
+/* ----------------------------------------------------------------- lane */
+
+.lane {
+  position: relative;
+  height: 10px;
+  margin-top: 9px;
+  background-color: var(--lane-bg);
+  /* One tick per hour across the fixed 16-hour scale. */
+  background-image: repeating-linear-gradient(
+    to right, var(--tick) 0 1px, transparent 1px 12.5%
+  );
+  border: 1px solid var(--hairline);
+}
+.lane-wide { height: 16px; margin-top: 0; }
+
+.lane-block { position: absolute; top: 0; bottom: 0; min-width: 2px; }
+.lane-clip-start { border-left: 2px solid var(--ink); }
+.lane-clip-end { border-right: 2px solid var(--ink); }
+
+/* Slot still held, still live. */
+.lane-scheduled { background: var(--accent); }
+/* Slot still held, but the appointment is closed. */
+.lane-completed { background: transparent; border: 1.5px solid var(--ink); }
+/* Slot handed back: hatched, and the whole track is struck through. */
+.lane-cancelled {
+  background-image: repeating-linear-gradient(
+    45deg, var(--muted) 0 1px, transparent 1px 4px
+  );
+}
+.card-cancelled .lane::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  background: var(--muted);
+}
+
+.lane-attempt { background: transparent; border: 2px solid var(--accent); }
+.lane-clash { background: var(--blocked); border-color: var(--blocked); }
+
+.availability { margin-top: 2px; }
+.availability-note { margin: 6px 0 0; font-size: 13px; color: var(--muted); }
+.availability-clash .availability-note { color: var(--blocked); font-weight: 500; }
+
+.lane-offscale {
+  margin: 9px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+  border-top: 1px solid var(--line);
+  padding-top: 6px;
+}
+
+/* Visible to screen readers only -- used for the two always-mounted live
+   regions, so an announcement is never missed by appearing with its text. */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* -------------------------------------------------------------- notices */
+
+.notice {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 22px;
+  color: var(--muted);
+  text-align: center;
+}
+.notice-error {
+  background: var(--blocked-wash);
+  border-color: var(--blocked-line);
+  color: var(--blocked);
+  text-align: left;
+  padding: 11px 13px;
+}
+
+.toast {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 20;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  font-size: 14px;
+}
+.toast-success { background: var(--accent-wash); border: 1px solid var(--accent-line); color: var(--accent-text); }
+.toast-error { background: var(--blocked-wash); border: 1px solid var(--blocked-line); color: var(--blocked); }
+.toast-close {
+  background: none;
+  border: 0;
+  cursor: pointer;
+  color: inherit;
+  font-size: 17px;
+  line-height: 1;
+  padding: 0;
+}
+
+/* --------------------------------------------------------------- dialog */
+
+.dialog {
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 22px;
+  width: min(520px, calc(100vw - 28px));
+  background: var(--card);
+  color: var(--ink);
+}
+.dialog::backdrop { background: var(--backdrop); }
+.dialog h2 { font-size: 19px; margin-bottom: 4px; }
+.dialog form { display: flex; flex-direction: column; gap: 13px; }
+.dialog label { display: flex; flex-direction: column; gap: 5px; }
+.dialog label > span { font-size: 13px; font-weight: 500; color: var(--muted); }
+.optional { font-weight: 400; }
+.dialog .row { display: flex; gap: 13px; }
+.dialog .row label { flex: 1; }
+.field-error { font-style: normal; font-size: 12px; font-weight: 500; color: var(--blocked); }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 4px; }
+
+/* ------------------------------------------------------- theme control */
+
+.themes {
+  display: inline-flex;
+  border: 1px solid var(--control-line);
+  border-radius: var(--radius);
+  background: var(--card);
+  overflow: hidden;
+}
+.themes button {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  padding: 6px 11px;
+}
+.themes button + button { border-left: 1px solid var(--control-line); }
+.themes button:hover { color: var(--ink); }
+.themes button[aria-pressed='true'] {
+  background: var(--accent-wash);
+  color: var(--accent-text);
+  font-weight: 700;
+}
+.masthead-tools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+/* ----------------------------------------------------------- responsive */
+
+/* Three narrow columns still beat a stack on a tablet: the matrix is the whole
+   point. Only below the width where a card can no longer hold a title and a row
+   of buttons does the board give up and stack. */
+@media (max-width: 1040px) {
+  .board-head, .day-row { gap: 10px; }
+  .cell { padding: 6px; }
+  .card { padding: 9px 10px 10px; }
+  .standfirst { font-size: 13px; }
+}
+
+@media (max-width: 720px) {
+  .board-head { display: none; }
+  .day-row { grid-template-columns: 1fr; gap: 8px; }
+  .cell { padding: 8px; }
+  .cell::before {
+    content: attr(data-column);
+    display: block;
+    margin: 0 2px 6px;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--muted);
+  }
+  /* A day band always holds at least one card, so hiding the empty columns
+     costs no information and saves a screenful of scrolling per day. */
+  .cell:not(:has(.card)) { display: none; }
+  .masthead { flex-direction: column; align-items: stretch; gap: 14px; }
+  .masthead-tools { justify-content: space-between; }
+  .controls { gap: 12px; }
+  .controls label { flex: 1 1 140px; }
+  .tally { flex-basis: 100%; margin-left: 0; }
+  .dialog { padding: 18px; }
+  .dialog .row { flex-direction: column; }
+  .toast { left: 12px; right: 12px; top: 12px; max-width: none; }
+}
+
+/* Coarse pointers cannot use HTML5 drag and drop at all, so the buttons are the
+   only path on a phone. Make them thumb-sized. */
+@media (pointer: coarse) {
+  .btn-sm { padding: 8px 12px; font-size: 13px; }
+  .card-actions { gap: 8px; }
+  .grip { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
